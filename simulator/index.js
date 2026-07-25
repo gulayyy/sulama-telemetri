@@ -56,7 +56,7 @@ function nextReading(sensor, now) {
 
   // 3) Sıcaklık: sinüs eğrisi + sensöre özel sapma + küçük gürültü.
   const temperature = clamp(
-    baseTemperature(now) + sensor.tempOffset + between(-0.4, 0.4),
+    baseTemperature(now) + sensor.tempOffset + between(-0.15, 0.15),
     -10,
     60
   );

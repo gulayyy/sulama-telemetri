@@ -15,6 +15,32 @@ prototip aşamasının standart yaklaşımı.
 
 ---
 
+## Ekran görüntüleri
+
+**Gösterge paneli** — özet kutuları, sensör kartları, nem ve sıcaklık grafikleri ve
+aktif uyarı listesi. Eşiğin altına düşen sensörün kartı kırmızıya döner.
+
+![Gösterge paneli](docs/screenshots/dashboard.png)
+
+**Nem grafiği** — toprak nemindeki testere dişi deseni: yavaş kuruma, ardından
+sulamayla ani sıçrama. Kesikli kırmızı çizgi %25 uyarı eşiği.
+
+![Nem grafiği](docs/screenshots/chart.png)
+
+**Tablo görünümü** — her grafiğin renkten bağımsız okunabilen eşdeğeri.
+
+![Tablo görünümü](docs/screenshots/table.png)
+
+**Açık tema** — panel işletim sistemi tercihini izler, üst çubuktan değiştirilebilir.
+
+![Açık tema](docs/screenshots/dashboard-light.png)
+
+**Giriş ekranı** — JWT ile korunan panele giriş.
+
+![Giriş ekranı](docs/screenshots/login.png)
+
+---
+
 ## Mimari
 
 ```
@@ -47,6 +73,18 @@ prototip aşamasının standart yaklaşımı.
 4. Dashboard REST API üzerinden anlık değerleri ve son 24 saatlik grafiği çeker,
    15 saniyede bir yeniler.
 
+### Arayüz tasarım notları
+
+- Nem ve sıcaklık **ayrı grafiklerde** gösterilir. Tek grafikte iki farklı ölçekli
+  y ekseni kullanmak, olmayan bir korelasyon varmış izlenimi yarattığı için tercih
+  edilmemiştir.
+- Grafik renkleri erişilebilirlik açısından doğrulanmıştır: renk körlüğü ayrımı,
+  kontrast ve lightness bandı kontrollerinden her iki temada da geçer.
+- Her grafiğin **tablo eşdeğeri** vardır; bilgi hiçbir yerde yalnızca renge
+  bırakılmaz (uyarılar ikon + metinle birlikte verilir).
+- Yenileme sırasında iskelet ekran gösterilmez; mevcut içerik düşük opaklıkta
+  tutulur, böylece yerleşim zıplamaz.
+
 ## Teknoloji yığını
 
 | Katman | Teknoloji |
@@ -55,7 +93,7 @@ prototip aşamasının standart yaklaşımı.
 | Veritabanı | PostgreSQL 16 |
 | Mesajlaşma | MQTT — Eclipse Mosquitto 2 |
 | Sensör simülatörü | Node.js |
-| Frontend | React + Vite + Recharts |
+| Frontend | React + Vite + Recharts (açık/koyu tema) |
 | Kimlik doğrulama | JWT |
 | Ortam | Docker Compose |
 | Test / doküman | Postman (newman) + README |
@@ -64,36 +102,59 @@ prototip aşamasının standart yaklaşımı.
 
 ## Kurulum
 
-Gereksinim: Docker Desktop ve Node.js 20+.
+Tek gereksinim: **Docker Desktop**. Beş servisin tamamı tek komutla ayağa kalkar.
 
 ```bash
 git clone <repo-url> && cd sulama-telemetri
-docker compose up -d
+docker compose up -d --build
 ```
 
-Ardından backend ve simülatörü çalıştırın:
+Dashboard: **http://localhost:8080** — kullanıcı `admin`, parola `sulama123`.
+
+| Servis | Adres | Açıklama |
+| --- | --- | --- |
+| frontend | `http://localhost:8080` | React dashboard (nginx) |
+| backend | `http://localhost:4000` | REST API + MQTT abonesi |
+| postgres | `localhost:5432` | `sulama` / `sulama123` / `telemetri` |
+| mosquitto | `localhost:1883` | MQTT broker |
+| simulator | — | 5 sanal sensör, 10 sn'de bir yayın |
+
+`db/init.sql` yalnızca veri tabanı ilk kez oluşturulurken çalışır. Şemayı sıfırlamak
+için volume'u da silin:
 
 ```bash
-cd backend && npm install && cp .env.example .env && npm start
+docker compose down -v && docker compose up -d
 ```
+
+Durum ve log kontrolü:
 
 ```bash
-cd simulator && npm install && npm start
+docker compose ps
+docker compose logs -f backend simulator
 ```
 
-Servisler:
-
-| Servis | Adres |
-| --- | --- |
-| PostgreSQL | `localhost:5432` (kullanıcı `sulama` / parola `sulama123` / db `telemetri`) |
-| Mosquitto | `localhost:1883` |
-| Backend API | `http://localhost:4000` |
+Kök dizindeki `package.json` bu komutlar için kısayollar içerir:
+`npm run up` / `down` / `reset` / `logs` / `test:api`.
 
 MQTT trafiğini dışarıdan izlemek için:
 
 ```bash
 docker exec sulama-telemetri-mosquitto-1 mosquitto_sub -t "farm/sensors/#" -v
 ```
+
+### Geliştirme modu
+
+Servisleri konteyner yerine yerelde çalıştırmak için (altyapı yine Docker'dan):
+
+```bash
+docker compose up -d postgres mosquitto
+cd backend && npm install && cp .env.example .env && npm start
+cd simulator && npm install && npm start
+cd frontend && npm install && npm run dev   # http://localhost:5173
+```
+
+> Frontend Vite 6 kullanır (Node 20 uyumluluğu için). Node 22+ ile Vite 8'e
+> yükseltilebilir.
 
 ### Ortam değişkenleri (`backend/.env`)
 
@@ -280,6 +341,21 @@ sulama-telemetri/
 ├── simulator/          5 sanal sensör, MQTT publisher
 ├── frontend/           React dashboard
 ├── db/init.sql         şema + seed veri
+├── docs/               Postman koleksiyonu, ekran görüntüleri, staj notları
 ├── mosquitto/          broker yapılandırması
 └── docker-compose.yml
 ```
+
+---
+
+## Bitti sayılma kriterleri
+
+- [x] `docker compose up` ile tüm sistem (DB, broker, backend, simülatör, frontend)
+      tek seferde ayağa kalkıyor.
+- [x] 5 sanal sensörden veri kesintisiz akıyor; grafikte gerçekçi testere dişi
+      deseni görülüyor.
+- [x] Nem eşiğin altına düşünce uyarı otomatik oluşuyor; dashboard'dan 'çözüldü'
+      işaretlenebiliyor.
+- [x] Tüm veri uçları JWT ile korunuyor ve Postman koleksiyonuyla test edilmiş
+      durumda (12 istek / 19 assertion).
+- [x] README: mimari şema + kurulum + ekran görüntüleri + örnek istekler içeriyor.

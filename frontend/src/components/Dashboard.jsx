@@ -2,17 +2,25 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchOpenAlerts, fetchReadings, fetchSensors, resolveAlert } from "../api";
 import { REFRESH_MS } from "../constants";
 import AlertsPanel from "./AlertsPanel";
-import ReadingsChart from "./ReadingsChart";
+import FilterBar from "./FilterBar";
+import MoistureChart from "./MoistureChart";
+import ReadingsTable from "./ReadingsTable";
 import SensorCard from "./SensorCard";
+import StatRow from "./StatRow";
+import TemperatureChart from "./TemperatureChart";
+import Topbar from "./Topbar";
+import { AlertIcon } from "./icons";
 
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ theme, onToggleTheme, onLogout }) {
   const [sensors, setSensors] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [readings, setReadings] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [range, setRange] = useState("24h");
+  const [view, setView] = useState("chart");
   const [updatedAt, setUpdatedAt] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
@@ -40,14 +48,18 @@ export default function Dashboard({ onLogout }) {
       setError(err.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [selectedId, range, onLogout]);
 
-  // Veriyi çek ve 15 saniyede bir yenile. Sensör ya da aralık değişince
-  // load fonksiyonu yenilenir; effect kapanışta eski zamanlayıcıyı temizler.
+  // Veriyi çek ve 15 saniyede bir yenile. Sensör ya da aralık değişince load
+  // yenilenir; effect kapanışta eski zamanlayıcıyı temizler.
   useEffect(() => {
     load();
-    const timer = setInterval(load, REFRESH_MS);
+    const timer = setInterval(() => {
+      setRefreshing(true);
+      load();
+    }, REFRESH_MS);
     return () => clearInterval(timer);
   }, [load]);
 
@@ -63,47 +75,73 @@ export default function Dashboard({ onLogout }) {
   const selectedSensor = sensors.find((sensor) => sensor.id === selectedId) ?? null;
 
   return (
-    <div className="dashboard">
-      <header className="app-header">
-        <div>
-          <h1>Sulama Telemetri</h1>
-          <p className="app-subtitle">Akıllı sulama sensör gösterge paneli</p>
+    <>
+      <Topbar
+        updatedAt={updatedAt}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+        onLogout={onLogout}
+      />
+
+      <div className={refreshing ? "page is-refreshing" : "page"}>
+        {error && (
+          <p className="notice" role="alert">
+            <AlertIcon />
+            {error}
+          </p>
+        )}
+
+        <StatRow sensors={sensors} alertCount={alerts.length} />
+
+        <div className="section-title">
+          <h2>Sensörler</h2>
+          <span>Grafiği değiştirmek için bir sensör kartına tıklayın</span>
         </div>
-        <div className="app-header-right">
-          <span className="updated-at">
-            {updatedAt
-              ? `Son güncelleme ${updatedAt.toLocaleTimeString("tr-TR")}`
-              : "Yükleniyor..."}
-          </span>
-          <button type="button" className="ghost" onClick={onLogout}>
-            Çıkış
-          </button>
-        </div>
-      </header>
 
-      {error && <p className="banner-error">{error}</p>}
+        <section className="sensor-grid">
+          {sensors.map((sensor) => (
+            <SensorCard
+              key={sensor.id}
+              sensor={sensor}
+              selected={sensor.id === selectedId}
+              onSelect={setSelectedId}
+            />
+          ))}
+        </section>
 
-      <section className="sensor-grid">
-        {sensors.map((sensor) => (
-          <SensorCard
-            key={sensor.id}
-            sensor={sensor}
-            selected={sensor.id === selectedId}
-            onSelect={setSelectedId}
-          />
-        ))}
-      </section>
-
-      <div className="panels">
-        <ReadingsChart
-          sensor={selectedSensor}
-          readings={readings}
+        <FilterBar
+          sensorName={selectedSensor?.name}
           range={range}
           onRangeChange={setRange}
-          loading={loading}
+          view={view}
+          onViewChange={setView}
         />
-        <AlertsPanel alerts={alerts} onResolve={handleResolve} />
+
+        <div className="panels">
+          <div className="charts">
+            {view === "chart" ? (
+              <>
+                <MoistureChart
+                  readings={readings}
+                  range={range}
+                  theme={theme}
+                  loading={loading}
+                />
+                <TemperatureChart
+                  readings={readings}
+                  range={range}
+                  theme={theme}
+                  loading={loading}
+                />
+              </>
+            ) : (
+              <ReadingsTable readings={readings} loading={loading} />
+            )}
+          </div>
+
+          <AlertsPanel alerts={alerts} onResolve={handleResolve} />
+        </div>
       </div>
-    </div>
+    </>
   );
 }

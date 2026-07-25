@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AlertIcon, CheckIcon } from "./icons";
 
 function formatDateTime(iso) {
   return new Date(iso).toLocaleString("tr-TR", {
@@ -23,24 +24,32 @@ export default function AlertsPanel({ alerts, onResolve }) {
 
   return (
     <section className="panel alerts-panel">
-      <header className="panel-header">
+      <div className="panel-head">
         <div>
           <h2>Aktif uyarılar</h2>
-          <p className="panel-subtitle">Sulama yapıldığında 'çözüldü' olarak işaretleyin</p>
+          <p className="panel-sub">Sulama yapıldığında 'çözüldü' olarak işaretleyin</p>
         </div>
-        <span className={alerts.length ? "badge badge-danger" : "badge"}>{alerts.length}</span>
-      </header>
+        <span className={alerts.length ? "badge badge-critical" : "badge badge-good"}>
+          {alerts.length}
+        </span>
+      </div>
 
       {alerts.length === 0 ? (
-        <p className="panel-empty">Açık uyarı yok — tüm parseller yeterli nemde.</p>
+        <div className="empty-state">
+          <CheckIcon />
+          <p>Açık uyarı yok — tüm parseller yeterli nemde.</p>
+        </div>
       ) : (
         <ul className="alert-list">
           {alerts.map((alert) => (
-            <li key={alert.id}>
+            <li key={alert.id} className="alert-item">
               <div>
-                <p className="alert-sensor">{alert.sensorName}</p>
-                <p className="alert-message">
-                  Toprak nemi %{alert.value} — {formatDateTime(alert.createdAt)}
+                <div className="alert-head">
+                  <AlertIcon />
+                  <span className="alert-sensor">{alert.sensorName}</span>
+                </div>
+                <p className="alert-meta">
+                  %{alert.value} · {formatDateTime(alert.createdAt)}
                 </p>
               </div>
               <button
@@ -48,7 +57,7 @@ export default function AlertsPanel({ alerts, onResolve }) {
                 onClick={() => handleResolve(alert.id)}
                 disabled={busyId === alert.id}
               >
-                {busyId === alert.id ? "..." : "Çözüldü"}
+                {busyId === alert.id ? "..." : "Sulama yapıldı"}
               </button>
             </li>
           ))}

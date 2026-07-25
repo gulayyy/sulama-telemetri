@@ -1,4 +1,5 @@
 import { MOISTURE_THRESHOLD } from "../constants";
+import { AlertIcon } from "./icons";
 
 function formatTime(iso) {
   if (!iso) return "—";
@@ -15,21 +16,45 @@ export default function SensorCard({ sensor, selected, onSelect }) {
     .join(" ");
 
   return (
-    <button type="button" className={className} onClick={() => onSelect(sensor.id)}>
-      <header>
-        <span className="sensor-name">{sensor.name}</span>
-        {dry && <span className="badge badge-danger">Sulama gerekli</span>}
-      </header>
-      <p className="sensor-location">{sensor.location}</p>
+    <button
+      type="button"
+      className={className}
+      onClick={() => onSelect(sensor.id)}
+      aria-pressed={selected}
+    >
+      <div className="sensor-card-head">
+        <div>
+          <p className="sensor-name">{sensor.name}</p>
+          <p className="sensor-location">{sensor.location}</p>
+        </div>
+        {dry && (
+          <span className="badge badge-critical">
+            <AlertIcon />
+            Sulama gerekli
+          </span>
+        )}
+      </div>
 
       {reading === null ? (
-        <p className="sensor-empty">Henüz veri yok</p>
+        <p className="sensor-empty">Bu sensörden henüz veri alınmadı.</p>
       ) : (
         <>
-          <div className="sensor-moisture">
+          <div className="sensor-reading">
             <span className="value">{reading.soilMoisture}</span>
-            <span className="unit">% nem</span>
+            <span className="unit">% toprak nemi</span>
           </div>
+
+          <div
+            className="level"
+            role="img"
+            aria-label={`Toprak nemi %${reading.soilMoisture}`}
+          >
+            <div
+              className={dry ? "level-fill is-dry" : "level-fill"}
+              style={{ width: `${Math.min(100, Math.max(0, reading.soilMoisture))}%` }}
+            />
+          </div>
+
           <dl className="sensor-metrics">
             <div>
               <dt>Sıcaklık</dt>
@@ -41,12 +66,13 @@ export default function SensorCard({ sensor, selected, onSelect }) {
             </div>
             <div>
               <dt>Pil</dt>
-              <dd className={lowBattery ? "text-danger" : undefined}>
-                {reading.battery === null ? "—" : `${reading.battery.toFixed(0)} %`}
+              <dd className={lowBattery ? "tone-critical" : undefined}>
+                {reading.battery === null ? "—" : `${Math.round(reading.battery)} %`}
               </dd>
             </div>
           </dl>
-          <footer>Son okuma: {formatTime(reading.recordedAt)}</footer>
+
+          <p className="sensor-foot">Son okuma {formatTime(reading.recordedAt)}</p>
         </>
       )}
     </button>
