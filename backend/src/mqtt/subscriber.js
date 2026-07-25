@@ -2,6 +2,7 @@ const mqtt = require("mqtt");
 const config = require("../config");
 const { validateReading } = require("../validation");
 const { insertReading } = require("../services/readingsService");
+const { createIrrigationAlertIfNeeded } = require("../services/alertsService");
 
 // /api/health endpoint'inin okuyacağı canlı durum bilgisi.
 const state = {
@@ -10,6 +11,7 @@ const state = {
   received: 0,
   stored: 0,
   rejected: 0,
+  alerts: 0,
 };
 
 // farm/sensors/3 → 3
@@ -49,6 +51,19 @@ async function handleMessage(topic, buffer) {
     } else {
       console.error(`[mqtt] ${topic} — kayıt hatası:`, err.message);
     }
+    return;
+  }
+
+  // Her kayıttan sonra eşik kontrolü: nem eşiğin altındaysa uyarı üret.
+  // Uyarı üretimi başarısız olsa bile okuma kaydedilmiş sayılır.
+  try {
+    const alert = await createIrrigationAlertIfNeeded(result.value);
+    if (alert) {
+      state.alerts++;
+      console.log(`[uyarı] #${alert.id} ${alert.message}`);
+    }
+  } catch (err) {
+    console.error(`[mqtt] ${topic} — uyarı üretilemedi:`, err.message);
   }
 }
 

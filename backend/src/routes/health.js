@@ -27,6 +27,7 @@ router.get("/", async (req, res) => {
       received: mqttState.received,
       stored: mqttState.stored,
       rejected: mqttState.rejected,
+      alertsCreated: mqttState.alerts,
     },
   });
 });
