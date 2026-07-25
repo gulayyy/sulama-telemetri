@@ -1,0 +1,317 @@
+{
+  "info": {
+    "name": "Sulama Telemetri API",
+    "description": "Akıllı Sulama Sensör Telemetri Platformu REST API koleksiyonu.\n\nKullanım: önce 'Auth / Login' isteğini çalıştırın; dönen token otomatik olarak {{token}} değişkenine yazılır ve diğer istekler bu token'ı kullanır.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "sensorId", "value": "1", "type": "string" },
+    { "key": "alertId", "value": "1", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /api/health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('servis ayakta', () => pm.response.code === 200);",
+                  "pm.test('DB bagli', () => pm.response.json().database === 'up');",
+                  "pm.test('MQTT bagli', () => pm.response.json().mqtt.status === 'up');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/health", "host": ["{{baseUrl}}"], "path": ["api", "health"] },
+            "description": "Servis + DB + MQTT bağlantı durumu. Kimlik doğrulama gerektirmez."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /api/auth/login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 dondu', () => pm.response.code === 200);",
+                  "const token = pm.response.json().token;",
+                  "pm.test('token geldi', () => Boolean(token));",
+                  "pm.collectionVariables.set('token', token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"sulama123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Kullanıcı adı/parola doğruysa JWT üretir. Token {{token}} değişkenine yazılır."
+          }
+        },
+        {
+          "name": "POST /api/auth/login — hatalı parola (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('401 dondu', () => pm.response.code === 401);"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"yanlis-parola\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sensors",
+      "item": [
+        {
+          "name": "GET /api/sensors",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 dondu', () => pm.response.code === 200);",
+                  "pm.test('5 sensor var', () => pm.response.json().length === 5);",
+                  "pm.test('son okuma dolu', () => pm.response.json()[0].lastReading !== null);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/sensors", "host": ["{{baseUrl}}"], "path": ["api", "sensors"] },
+            "description": "Sensör listesi + her sensörün son okuması."
+          }
+        },
+        {
+          "name": "GET /api/sensors/:id/readings?range=24h",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 dondu', () => pm.response.code === 200);",
+                  "pm.test('okuma listesi geldi', () => Array.isArray(pm.response.json().readings));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors/{{sensorId}}/readings?range=24h",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors", "{{sensorId}}", "readings"],
+              "query": [{ "key": "range", "value": "24h", "description": "1h | 24h | 7d" }]
+            },
+            "description": "Zaman aralıklı ham telemetri verisi."
+          }
+        },
+        {
+          "name": "GET /api/sensors/:id/stats?range=24h",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 dondu', () => pm.response.code === 200);",
+                  "pm.test('istatistik geldi', () => pm.response.json().stats.count >= 0);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors/{{sensorId}}/stats?range=24h",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors", "{{sensorId}}", "stats"],
+              "query": [{ "key": "range", "value": "24h", "description": "1h | 24h | 7d" }]
+            },
+            "description": "Seçilen aralık için min / max / ortalama değerler."
+          }
+        },
+        {
+          "name": "GET /api/sensors — token yok (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('401 dondu', () => pm.response.code === 401);"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/sensors", "host": ["{{baseUrl}}"], "path": ["api", "sensors"] }
+          }
+        },
+        {
+          "name": "GET /api/sensors/:id/readings — geçersiz range (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('400 dondu', () => pm.response.code === 400);"]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors/{{sensorId}}/readings?range=99y",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors", "{{sensorId}}", "readings"],
+              "query": [{ "key": "range", "value": "99y" }]
+            }
+          }
+        },
+        {
+          "name": "GET /api/sensors/:id/stats — olmayan sensör (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('404 dondu', () => pm.response.code === 404);"]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors/9999/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors", "9999", "stats"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alerts",
+      "item": [
+        {
+          "name": "GET /api/alerts?resolved=false",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 dondu', () => pm.response.code === 200);",
+                  "const alerts = pm.response.json().alerts;",
+                  "if (alerts.length) { pm.collectionVariables.set('alertId', alerts[0].id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts?resolved=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "alerts"],
+              "query": [{ "key": "resolved", "value": "false", "description": "true | false (bos: hepsi)" }]
+            },
+            "description": "Aktif (çözülmemiş) sulama uyarıları. İlk uyarının id'si {{alertId}} değişkenine yazılır."
+          }
+        },
+        {
+          "name": "PATCH /api/alerts/:id/resolve",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 veya 409 dondu', () => [200, 409].includes(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "alerts", "{{alertId}}", "resolve"]
+            },
+            "description": "Uyarıyı 'sulama yapıldı' olarak kapatır. Zaten kapalıysa 409 döner."
+          }
+        },
+        {
+          "name": "PATCH /api/alerts/:id/resolve — olmayan uyarı (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('404 dondu', () => pm.response.code === 404);"]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts/999999/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "alerts", "999999", "resolve"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
