@@ -1,0 +1,13 @@
+{
+  "name": "sulama-telemetri-simulator",
+  "version": "1.0.0",
+  "description": "5 sanal toprak sensörü için MQTT telemetri simülatörü",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "mqtt": "^5.15.2"
+  }
+}
