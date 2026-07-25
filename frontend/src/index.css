@@ -562,13 +562,6 @@ button:disabled {
   background: linear-gradient(var(--critical-wash), var(--critical-wash)), var(--surface);
 }
 
-.sensor-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .sensor-name {
   font-weight: 600;
   font-size: 14.5px;
@@ -578,12 +571,21 @@ button:disabled {
   font-size: 12px;
   color: var(--ink-3);
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sensor-reading {
   display: flex;
   align-items: baseline;
   gap: 6px;
+}
+
+/* Uyarı rozeti nem değerinin sağında durur; başlığı ikinci satıra kırmaz. */
+.sensor-reading .badge {
+  margin-left: auto;
+  align-self: center;
 }
 
 .sensor-reading .value {

@@ -23,16 +23,8 @@ export default function SensorCard({ sensor, selected, onSelect }) {
       aria-pressed={selected}
     >
       <div className="sensor-card-head">
-        <div>
-          <p className="sensor-name">{sensor.name}</p>
-          <p className="sensor-location">{sensor.location}</p>
-        </div>
-        {dry && (
-          <span className="badge badge-critical">
-            <AlertIcon />
-            Sulama gerekli
-          </span>
-        )}
+        <p className="sensor-name">{sensor.name}</p>
+        <p className="sensor-location">{sensor.location}</p>
       </div>
 
       {reading === null ? (
@@ -42,6 +34,12 @@ export default function SensorCard({ sensor, selected, onSelect }) {
           <div className="sensor-reading">
             <span className="value">{reading.soilMoisture}</span>
             <span className="unit">% toprak nemi</span>
+            {dry && (
+              <span className="badge badge-critical">
+                <AlertIcon />
+                Sulama gerekli
+              </span>
+            )}
           </div>
 
           <div
