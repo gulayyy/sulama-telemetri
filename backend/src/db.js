@@ -1,5 +1,10 @@
-const { Pool } = require("pg");
+const { Pool, types } = require("pg");
 const config = require("./config");
+
+// pg, NUMERIC ve BIGINT değerlerini varsayılan olarak string döndürür.
+// JSON yanıtlarında sayı görmek için tip çeviricilerini elle ayarlıyoruz.
+types.setTypeParser(1700, (value) => (value === null ? null : parseFloat(value))); // numeric
+types.setTypeParser(20, (value) => (value === null ? null : parseInt(value, 10))); // int8
 
 // Bağlantı havuzu: her sorgu için yeni bağlantı açmak yerine hazır
 // bağlantılar yeniden kullanılır (10 sn'de bir gelen insert'ler için önemli).
