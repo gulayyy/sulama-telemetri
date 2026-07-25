@@ -1,0 +1,16 @@
+{
+  "name": "sulama-telemetri-backend",
+  "version": "1.0.0",
+  "description": "MQTT abonesi + REST API (sulama telemetri platformu)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "mqtt": "^5.15.2",
+    "pg": "^8.13.1"
+  }
+}
