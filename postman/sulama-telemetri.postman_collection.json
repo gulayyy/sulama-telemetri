@@ -1,0 +1,1239 @@
+{
+  "info": {
+    "_postman_id": "9c4b1f2a-7e35-4d80-b1a6-3f8d21c05e7b",
+    "name": "Sulama Telemetri API",
+    "description": "Tarim/sera sulama telemetri sisteminin REST API test koleksiyonu.\n\nSensorler MQTT uzerinden `farm/sensors/{sensorId}` topic'ine olcum yayinlar, consumer bu veriyi PostgreSQL'e yazar, toprak nemi esigin altina dustugunde `IRRIGATION_NEEDED` alarmi uretilir. Bu koleksiyon o veriyi disari acan HTTP katmanini test eder.\n\n## Klasorler\n\n1. **Health** - servis ayakta mi\n2. **Sensors** - sensor katalogu ve olcum gecmisi\n3. **Readings** - olcum yazma\n4. **Alerts** - sulama alarmlari\n5. **Stats** - ozet istatistikler\n6. **Senaryo: Sulama Alarmi** - ucdan uca zincirli akis\n7. **Hata Senaryolari** - 400 / 404 dogrulamalari\n\n## Calistirma\n\nOnce ortami ayaga kaldir:\n\n```\ndocker compose up -d\n```\n\nSonra Postman'de `Sulama Telemetri - Local` ortamini sec ve koleksiyonu Runner ile calistir. Komut satirindan:\n\n```\nnewman run postman/sulama-telemetri.postman_collection.json \\\n  -e postman/sulama-telemetri.postman_environment.json\n```\n\n## Notlar\n\n- Liste donen uclar duz JSON dizisi dondurur, zarf (envelope) kullanilmaz.\n- Zaman alanlari ISO-8601 / UTC (`TIMESTAMPTZ`) formatindadir.\n- Sayisal olcum alanlari `NUMERIC(5,2)` oldugu icin JSON'da string degil number beklenir.\n- `Senaryo` ve `Alerts` klasorleri sirali calismalidir; degiskenleri birbirine devrederler.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Koleksiyon calismadan once baseUrl tanimli mi diye bak.",
+          "if (!pm.variables.get('baseUrl')) {",
+          "    console.warn('baseUrl tanimsiz. Ortam dosyasini sectiginden emin ol.');",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Her istekten sonra calisan ortak kontroller.",
+          "",
+          "pm.test('Yanit suresi 1000 ms altinda', function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(1000);",
+          "});",
+          "",
+          "pm.test('Sunucu hatasi (5xx) donmedi', function () {",
+          "    pm.expect(pm.response.code).to.be.below(500);",
+          "});",
+          "",
+          "if (pm.response.code !== 204) {",
+          "    pm.test('Content-Type application/json', function () {",
+          "        pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json');",
+          "    });",
+          "",
+          "    pm.test('Govde gecerli JSON', function () {",
+          "        pm.response.to.be.json;",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "sensorId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "readingId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "alertId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "moistureThreshold",
+      "value": "30",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('status alani ok', function () {",
+                  "    pm.expect(body).to.have.property('status', 'ok');",
+                  "});",
+                  "",
+                  "pm.test('Veritabani baglantisi bildirilmis', function () {",
+                  "    pm.expect(body).to.have.property('database');",
+                  "    pm.expect(body.database).to.eql('up');",
+                  "});",
+                  "",
+                  "pm.test('MQTT baglantisi bildirilmis', function () {",
+                  "    pm.expect(body).to.have.property('mqtt');",
+                  "    pm.expect(body.mqtt).to.eql('connected');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Servisin ve bagimliliklarinin (Postgres, Mosquitto) ayakta olup olmadigini dondurur.\n\nBeklenen govde:\n\n```json\n{ \"status\": \"ok\", \"database\": \"up\", \"mqtt\": \"connected\", \"uptime\": 128.4 }\n```"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Sensors",
+      "item": [
+        {
+          "name": "Tum Sensorleri Listele",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Yanit bir dizi', function () {",
+                  "    pm.expect(body).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('En az bir sensor kayitli (seed verisi)', function () {",
+                  "    pm.expect(body.length).to.be.at.least(1);",
+                  "});",
+                  "",
+                  "pm.test('Her sensor beklenen alanlari tasiyor', function () {",
+                  "    body.forEach(function (s) {",
+                  "        pm.expect(s, 'sensor ' + JSON.stringify(s)).to.have.all.keys(",
+                  "            'id', 'name', 'location', 'type', 'created_at'",
+                  "        );",
+                  "        pm.expect(s.id).to.be.a('number');",
+                  "        pm.expect(s.name).to.be.a('string').and.not.empty;",
+                  "        pm.expect(s.type).to.be.a('string');",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test('created_at gecerli ISO-8601 tarihi', function () {",
+                  "    body.forEach(function (s) {",
+                  "        pm.expect(new Date(s.created_at).toString()).to.not.eql('Invalid Date');",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test(\"Seed sensoru 'Sera-1 Kuzey' mevcut\", function () {",
+                  "    const isimler = body.map(function (s) { return s.name; });",
+                  "    pm.expect(isimler).to.include('Sera-1 Kuzey');",
+                  "});",
+                  "",
+                  "// Sonraki istekler icin ilk sensorun id'sini sakla.",
+                  "if (body.length > 0) {",
+                  "    pm.collectionVariables.set('sensorId', String(body[0].id));",
+                  "    console.log('sensorId =', body[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors"]
+            },
+            "description": "`sensors` tablosundaki tum sensorleri dondurur. init.sql 5 adet seed kaydi olusturur."
+          },
+          "response": []
+        },
+        {
+          "name": "Tek Sensor Detayi",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "const beklenenId = Number(pm.collectionVariables.get('sensorId'));",
+                  "",
+                  "pm.test('Istenen sensor donuyor', function () {",
+                  "    pm.expect(body.id).to.eql(beklenenId);",
+                  "});",
+                  "",
+                  "pm.test('Alan tipleri dogru', function () {",
+                  "    pm.expect(body.name).to.be.a('string');",
+                  "    pm.expect(body.location).to.be.a('string');",
+                  "    pm.expect(body.type).to.be.a('string');",
+                  "});",
+                  "",
+                  "pm.test('type varsayilan olarak soil', function () {",
+                  "    pm.expect(body.type).to.eql('soil');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors/{{sensorId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors", "{{sensorId}}"]
+            },
+            "description": "Tek bir sensorun katalog bilgisini dondurur."
+          },
+          "response": []
+        },
+        {
+          "name": "Sensorun Son Olcumu",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Olcum alanlari mevcut', function () {",
+                  "    pm.expect(body).to.have.property('id');",
+                  "    pm.expect(body).to.have.property('sensor_id');",
+                  "    pm.expect(body).to.have.property('soil_moisture');",
+                  "    pm.expect(body).to.have.property('temperature');",
+                  "    pm.expect(body).to.have.property('recorded_at');",
+                  "});",
+                  "",
+                  "pm.test('Olcum dogru sensore ait', function () {",
+                  "    pm.expect(body.sensor_id).to.eql(Number(pm.collectionVariables.get('sensorId')));",
+                  "});",
+                  "",
+                  "pm.test('Sayisal alanlar number tipinde (string degil)', function () {",
+                  "    pm.expect(body.soil_moisture).to.be.a('number');",
+                  "    pm.expect(body.temperature).to.be.a('number');",
+                  "});",
+                  "",
+                  "pm.test('Toprak nemi 0-100 araliginda', function () {",
+                  "    pm.expect(body.soil_moisture).to.be.within(0, 100);",
+                  "});",
+                  "",
+                  "pm.test('Sicaklik makul aralikta (-50 / 100 C)', function () {",
+                  "    pm.expect(body.temperature).to.be.within(-50, 100);",
+                  "});",
+                  "",
+                  "pm.test('Pil seviyesi 0-100 araliginda', function () {",
+                  "    if (body.battery !== null && body.battery !== undefined) {",
+                  "        pm.expect(body.battery).to.be.within(0, 100);",
+                  "    }",
+                  "});",
+                  "",
+                  "pm.test('recorded_at gecmiste bir zaman', function () {",
+                  "    const t = new Date(body.recorded_at).getTime();",
+                  "    pm.expect(t).to.not.be.NaN;",
+                  "    pm.expect(t).to.be.at.most(Date.now() + 5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors/{{sensorId}}/latest",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors", "{{sensorId}}", "latest"],
+              "description": "Simulator calisiyorsa 10 saniyede bir tazelenir."
+            },
+            "description": "Sensorun en guncel olcumunu dondurur.\n\nSQL karsiligi `idx_readings_sensor_time (sensor_id, recorded_at DESC)` indeksini kullanir:\n\n```sql\nSELECT * FROM readings WHERE sensor_id = $1 ORDER BY recorded_at DESC LIMIT 1;\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "Sensor Olcum Gecmisi",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Yanit bir dizi', function () {",
+                  "    pm.expect(body).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('limit parametresine uyuluyor (<= 10)', function () {",
+                  "    pm.expect(body.length).to.be.at.most(10);",
+                  "});",
+                  "",
+                  "pm.test('Tum kayitlar istenen sensore ait', function () {",
+                  "    const id = Number(pm.collectionVariables.get('sensorId'));",
+                  "    body.forEach(function (r) {",
+                  "        pm.expect(r.sensor_id).to.eql(id);",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test('Kayitlar recorded_at azalan sirada', function () {",
+                  "    for (let i = 1; i < body.length; i++) {",
+                  "        const onceki = new Date(body[i - 1].recorded_at).getTime();",
+                  "        const simdiki = new Date(body[i].recorded_at).getTime();",
+                  "        pm.expect(onceki, 'index ' + i).to.be.at.least(simdiki);",
+                  "    }",
+                  "});",
+                  "",
+                  "pm.test('Olcum degerleri gecerli aralikta', function () {",
+                  "    body.forEach(function (r) {",
+                  "        pm.expect(r.soil_moisture).to.be.within(0, 100);",
+                  "        pm.expect(r.temperature).to.be.within(-50, 100);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors/{{sensorId}}/readings?limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors", "{{sensorId}}", "readings"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Donulecek maksimum kayit sayisi. Varsayilan 100."
+                },
+                {
+                  "key": "from",
+                  "value": "2026-01-01T00:00:00Z",
+                  "description": "Baslangic zamani (ISO-8601). Opsiyonel.",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31T23:59:59Z",
+                  "description": "Bitis zamani (ISO-8601). Opsiyonel.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Sensorun olcum gecmisini yeniden eskiye dogru dondurur. `from` / `to` ile zaman araligi daraltilabilir."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Readings",
+      "item": [
+        {
+          "name": "Yeni Olcum Ekle",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Esigin uzerinde, alarm tetiklemeyecek bir nem degeri uret.",
+                  "const esik = Number(pm.collectionVariables.get('moistureThreshold'));",
+                  "const nem = +(esik + 10 + Math.random() * 30).toFixed(2);",
+                  "",
+                  "pm.variables.set('rndSoilMoisture', nem);",
+                  "pm.variables.set('rndTemperature', +(18 + Math.random() * 16).toFixed(2));",
+                  "pm.variables.set('rndAirHumidity', +(35 + Math.random() * 40).toFixed(2));",
+                  "pm.variables.set('rndBattery', +(80 + Math.random() * 20).toFixed(2));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Olusturulan kaydin id degeri donuyor', function () {",
+                  "    pm.expect(body).to.have.property('id');",
+                  "    pm.expect(body.id).to.be.a('number');",
+                  "});",
+                  "",
+                  "pm.test('Gonderilen degerler aynen kaydedilmis', function () {",
+                  "    pm.expect(body.soil_moisture).to.eql(Number(pm.variables.get('rndSoilMoisture')));",
+                  "    pm.expect(body.temperature).to.eql(Number(pm.variables.get('rndTemperature')));",
+                  "});",
+                  "",
+                  "pm.test('Sunucu recorded_at atamis', function () {",
+                  "    pm.expect(body).to.have.property('recorded_at');",
+                  "    pm.expect(new Date(body.recorded_at).toString()).to.not.eql('Invalid Date');",
+                  "});",
+                  "",
+                  "pm.test('Location basligi yeni kaynagi isaret ediyor', function () {",
+                  "    const loc = pm.response.headers.get('Location');",
+                  "    pm.expect(loc, 'Location basligi').to.be.a('string');",
+                  "    pm.expect(loc).to.include('/api/readings/' + body.id);",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('readingId', String(body.id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sensorId\": {{sensorId}},\n  \"soilMoisture\": {{rndSoilMoisture}},\n  \"temperature\": {{rndTemperature}},\n  \"airHumidity\": {{rndAirHumidity}},\n  \"battery\": {{rndBattery}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/readings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "readings"]
+            },
+            "description": "MQTT disinda manuel olcum girisi. Govde alanlari simulatorun yayinladigi payload ile ayni sekilde camelCase'dir; API bunu snake_case sutunlara yazar.\n\nPre-request script her calistirmada rastgele ama esik ustu (alarm uretmeyen) degerler uretir."
+          },
+          "response": []
+        },
+        {
+          "name": "Olcumu Id ile Getir",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Bir onceki istekte olusturulan kayit donuyor', function () {",
+                  "    pm.expect(body.id).to.eql(Number(pm.collectionVariables.get('readingId')));",
+                  "});",
+                  "",
+                  "pm.test('sensor_id gecerli bir referans', function () {",
+                  "    pm.expect(body.sensor_id).to.be.a('number');",
+                  "    pm.expect(body.sensor_id).to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/readings/{{readingId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "readings", "{{readingId}}"]
+            },
+            "description": "Bir onceki POST'ta olusturulan kaydin gercekten kalici oldugunu dogrular."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Alerts",
+      "item": [
+        {
+          "name": "Acik Alarmlari Listele",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Yanit bir dizi', function () {",
+                  "    pm.expect(body).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('Tum alarmlar cozulmemis (resolved = false)', function () {",
+                  "    body.forEach(function (a) {",
+                  "        pm.expect(a.resolved).to.eql(false);",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test('Alarm alanlari eksiksiz', function () {",
+                  "    body.forEach(function (a) {",
+                  "        pm.expect(a).to.have.property('id');",
+                  "        pm.expect(a).to.have.property('sensor_id');",
+                  "        pm.expect(a).to.have.property('alert_type');",
+                  "        pm.expect(a).to.have.property('message');",
+                  "        pm.expect(a).to.have.property('value');",
+                  "        pm.expect(a).to.have.property('created_at');",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test('alert_type bilinen bir deger', function () {",
+                  "    const gecerli = ['IRRIGATION_NEEDED', 'LOW_BATTERY', 'SENSOR_OFFLINE', 'HIGH_TEMPERATURE'];",
+                  "    body.forEach(function (a) {",
+                  "        pm.expect(gecerli, 'beklenmeyen tur: ' + a.alert_type).to.include(a.alert_type);",
+                  "    });",
+                  "});",
+                  "",
+                  "if (body.length > 0) {",
+                  "    pm.collectionVariables.set('alertId', String(body[0].id));",
+                  "    console.log('alertId =', body[0].id);",
+                  "} else {",
+                  "    console.log('Acik alarm yok. Senaryo klasoru bir tane uretecek.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts?resolved=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "alerts"],
+              "query": [
+                {
+                  "key": "resolved",
+                  "value": "false",
+                  "description": "true / false. Verilmezse tum alarmlar doner."
+                },
+                {
+                  "key": "sensorId",
+                  "value": "{{sensorId}}",
+                  "description": "Tek bir sensorun alarmlari. Opsiyonel.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Henuz cozulmemis (acik) sulama alarmlarini dondurur. Dashboard'un ana beslemesi."
+          },
+          "response": []
+        },
+        {
+          "name": "Tum Alarmlari Listele",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Yanit bir dizi', function () {",
+                  "    pm.expect(body).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('resolved alani boolean tipinde', function () {",
+                  "    body.forEach(function (a) {",
+                  "        pm.expect(a.resolved).to.be.a('boolean');",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test('Alarmlar en yeniden eskiye sirali', function () {",
+                  "    for (let i = 1; i < body.length; i++) {",
+                  "        const onceki = new Date(body[i - 1].created_at).getTime();",
+                  "        const simdiki = new Date(body[i].created_at).getTime();",
+                  "        pm.expect(onceki, 'index ' + i).to.be.at.least(simdiki);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "alerts"]
+            },
+            "description": "Acik ve kapali tum alarmlar."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Stats",
+      "item": [
+        {
+          "name": "Genel Ozet Istatistikler",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Ozet alanlari mevcut', function () {",
+                  "    pm.expect(body).to.have.property('sensorCount');",
+                  "    pm.expect(body).to.have.property('readingCount');",
+                  "    pm.expect(body).to.have.property('openAlertCount');",
+                  "    pm.expect(body).to.have.property('averages');",
+                  "});",
+                  "",
+                  "pm.test('Sayaclar negatif olmayan tamsayi', function () {",
+                  "    [body.sensorCount, body.readingCount, body.openAlertCount].forEach(function (n) {",
+                  "        pm.expect(n).to.be.a('number');",
+                  "        pm.expect(n % 1).to.eql(0);",
+                  "        pm.expect(n).to.be.at.least(0);",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test('Ortalamalar gecerli aralikta', function () {",
+                  "    pm.expect(body.averages.soilMoisture).to.be.within(0, 100);",
+                  "    pm.expect(body.averages.temperature).to.be.within(-50, 100);",
+                  "});",
+                  "",
+                  "pm.test('sensorCount seed verisiyle tutarli (>= 5)', function () {",
+                  "    pm.expect(body.sensorCount).to.be.at.least(5);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stats"]
+            },
+            "description": "Dashboard ozeti.\n\nBeklenen govde:\n\n```json\n{\n  \"sensorCount\": 5,\n  \"readingCount\": 1284,\n  \"openAlertCount\": 2,\n  \"averages\": { \"soilMoisture\": 44.7, \"temperature\": 25.9, \"battery\": 89.4 }\n}\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "Sensor Bazli Istatistik",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Istenen sensore ait', function () {",
+                  "    pm.expect(body.sensorId).to.eql(Number(pm.collectionVariables.get('sensorId')));",
+                  "});",
+                  "",
+                  "pm.test('min <= avg <= max tutarliligi', function () {",
+                  "    pm.expect(body.soilMoisture.min).to.be.at.most(body.soilMoisture.avg);",
+                  "    pm.expect(body.soilMoisture.avg).to.be.at.most(body.soilMoisture.max);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/stats?sensorId={{sensorId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stats"],
+              "query": [
+                {
+                  "key": "sensorId",
+                  "value": "{{sensorId}}"
+                }
+              ]
+            },
+            "description": "Tek sensor icin min / avg / max degerleri."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Senaryo: Sulama Alarmi",
+      "description": "Ucdan uca zincirli akis. Sirali calismalidir.\n\n1. Esik altinda nem degerine sahip bir olcum yazilir\n2. Sistemin `IRRIGATION_NEEDED` alarmi uretmesi beklenir\n3. Alarm cozulur\n4. Alarmin artik acik listesinde olmadigi dogrulanir",
+      "item": [
+        {
+          "name": "Adim 1 - Dusuk Nemli Olcum Gonder",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Esigin ALTINDA bir nem degeri uret ki alarm tetiklensin.",
+                  "const esik = Number(pm.collectionVariables.get('moistureThreshold'));",
+                  "const dusukNem = +(Math.max(1, esik - 10) + Math.random() * 5).toFixed(2);",
+                  "",
+                  "pm.variables.set('dusukNem', dusukNem);",
+                  "pm.collectionVariables.set('senaryoNem', String(dusukNem));",
+                  "console.log('Gonderilecek nem:', dusukNem, '(esik', esik + ')');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Kaydedilen nem esigin altinda', function () {",
+                  "    const esik = Number(pm.collectionVariables.get('moistureThreshold'));",
+                  "    pm.expect(body.soil_moisture).to.be.below(esik);",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('readingId', String(body.id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sensorId\": {{sensorId}},\n  \"soilMoisture\": {{dusukNem}},\n  \"temperature\": 31.4,\n  \"airHumidity\": 38.2,\n  \"battery\": 88.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/readings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "readings"]
+            },
+            "description": "Toprak nemi esigin altinda bir olcum yazar. API'nin bu kaydi isledikten sonra `alerts` tablosuna `IRRIGATION_NEEDED` satiri eklemesi beklenir."
+          },
+          "response": []
+        },
+        {
+          "name": "Adim 2 - Alarm Uretildi mi",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "const sensorId = Number(pm.collectionVariables.get('sensorId'));",
+                  "const gonderilenNem = Number(pm.collectionVariables.get('senaryoNem'));",
+                  "",
+                  "pm.test('En az bir acik alarm var', function () {",
+                  "    pm.expect(body.length).to.be.at.least(1);",
+                  "});",
+                  "",
+                  "const alarm = body.find(function (a) {",
+                  "    return a.sensor_id === sensorId && a.alert_type === 'IRRIGATION_NEEDED';",
+                  "});",
+                  "",
+                  "pm.test('Bu sensor icin IRRIGATION_NEEDED alarmi uretilmis', function () {",
+                  "    pm.expect(alarm, 'sensor ' + sensorId + ' icin alarm bulunamadi').to.not.be.undefined;",
+                  "});",
+                  "",
+                  "if (alarm) {",
+                  "    pm.test('Alarm degeri gonderilen olcumle eslesiyor', function () {",
+                  "        pm.expect(alarm.value).to.eql(gonderilenNem);",
+                  "    });",
+                  "",
+                  "    pm.test('Alarm mesaji dolu', function () {",
+                  "        pm.expect(alarm.message).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "",
+                  "    pm.test('Alarm henuz cozulmemis', function () {",
+                  "        pm.expect(alarm.resolved).to.eql(false);",
+                  "    });",
+                  "",
+                  "    pm.test('Alarm az once olusturulmus (son 60 sn)', function () {",
+                  "        const fark = Date.now() - new Date(alarm.created_at).getTime();",
+                  "        pm.expect(fark).to.be.below(60000);",
+                  "    });",
+                  "",
+                  "    pm.collectionVariables.set('alertId', String(alarm.id));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts?resolved=false&sensorId={{sensorId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "alerts"],
+              "query": [
+                {
+                  "key": "resolved",
+                  "value": "false"
+                },
+                {
+                  "key": "sensorId",
+                  "value": "{{sensorId}}"
+                }
+              ]
+            },
+            "description": "Bir onceki adimda yazilan dusuk nemli olcumun alarm uretip uretmedigini dogrular."
+          },
+          "response": []
+        },
+        {
+          "name": "Adim 3 - Alarmi Coz",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Alarm cozuldu olarak isaretlendi', function () {",
+                  "    pm.expect(body.resolved).to.eql(true);",
+                  "});",
+                  "",
+                  "pm.test('Dogru alarm guncellendi', function () {",
+                  "    pm.expect(body.id).to.eql(Number(pm.collectionVariables.get('alertId')));",
+                  "});",
+                  "",
+                  "pm.test('alert_type degismedi', function () {",
+                  "    pm.expect(body.alert_type).to.eql('IRRIGATION_NEEDED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resolved\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts/{{alertId}}/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "alerts", "{{alertId}}", "resolve"]
+            },
+            "description": "Sulama yapildiktan sonra alarmi kapatir."
+          },
+          "response": []
+        },
+        {
+          "name": "Adim 4 - Alarm Acik Listesinden Dustu mu",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "const cozulenId = Number(pm.collectionVariables.get('alertId'));",
+                  "",
+                  "pm.test('Cozulen alarm artik acik listesinde degil', function () {",
+                  "    const idler = body.map(function (a) { return a.id; });",
+                  "    pm.expect(idler).to.not.include(cozulenId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts?resolved=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "alerts"],
+              "query": [
+                {
+                  "key": "resolved",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "Senaryonun kapanisi: cozulen alarmin acik listesinden dustugunu dogrular."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Hata Senaryolari",
+      "description": "API'nin gecersiz girdiye dogru HTTP durum kodlariyla cevap verdigini dogrular.",
+      "item": [
+        {
+          "name": "404 - Olmayan Sensor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 404', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test('Hata govdesi aciklayici', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('error');",
+                  "    pm.expect(body.error).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors/999999",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors", "999999"]
+            },
+            "description": "Var olmayan sensor id'si 404 dondurmeli, 500 degil."
+          },
+          "response": []
+        },
+        {
+          "name": "400 - Bos Govde ile Olcum",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 400', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Eksik alanlar bildiriliyor', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('error');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/readings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "readings"]
+            },
+            "description": "`soilMoisture` ve `temperature` sutunlari NOT NULL. Bos govde veritabanina hic ulasmadan 400 ile reddedilmeli."
+          },
+          "response": []
+        },
+        {
+          "name": "400 - Aralik Disi Nem Degeri",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 400', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Hata mesaji nem alanina isaret ediyor', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(JSON.stringify(body).toLowerCase()).to.include('moisture');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sensorId\": {{sensorId}},\n  \"soilMoisture\": 150,\n  \"temperature\": 24.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/readings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "readings"]
+            },
+            "description": "Nem yuzde degeridir, 0-100 disi kabul edilmemeli. Ayrica `NUMERIC(5,2)` en fazla 999.99 tutar; dogrulama olmadan buyuk degerler veritabani hatasi verir."
+          },
+          "response": []
+        },
+        {
+          "name": "400 - Olmayan Sensore Olcum",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 400 veya 404', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([400, 404]);",
+                  "});",
+                  "",
+                  "pm.test('Ham veritabani hatasi sizdirilmiyor', function () {",
+                  "    const metin = pm.response.text().toLowerCase();",
+                  "    pm.expect(metin).to.not.include('foreign key');",
+                  "    pm.expect(metin).to.not.include('violates');",
+                  "    pm.expect(metin).to.not.include('pg_');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sensorId\": 999999,\n  \"soilMoisture\": 42.0,\n  \"temperature\": 24.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/readings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "readings"]
+            },
+            "description": "`readings.sensor_id` yabanci anahtardir. API bunu kendi dogrulamasiyla yakalamali, Postgres FK hatasini kullaniciya sizdirmamali."
+          },
+          "response": []
+        },
+        {
+          "name": "404 - Olmayan Alarmi Coz",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 404', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resolved\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/alerts/999999/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "alerts", "999999", "resolve"]
+            },
+            "description": "Var olmayan alarm 404 dondurmeli."
+          },
+          "response": []
+        },
+        {
+          "name": "400 - Gecersiz limit Parametresi",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Durum kodu 400', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Hata mesaji limit alanina isaret ediyor', function () {",
+                  "    pm.expect(pm.response.text().toLowerCase()).to.include('limit');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sensors/{{sensorId}}/readings?limit=abc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sensors", "{{sensorId}}", "readings"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "abc"
+                }
+              ]
+            },
+            "description": "Sayisal olmayan `limit` degeri reddedilmeli. Dogrulanmadan SQL'e gecerse sorgu patlar."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
